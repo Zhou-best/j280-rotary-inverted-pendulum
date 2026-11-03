@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Note: 16MB flash, ESP-SR models need SPIFFS "model" partition
+nvs,      data, nvs,     0x9000,  24K,
+phy_init, data, phy,     0xf000,  4K,
+factory,  app,  factory, 0x10000, 3M,
+model,    data, spiffs,  ,        5M,
+voice_data, data, undefined, ,    4M,

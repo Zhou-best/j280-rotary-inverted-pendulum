@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>J280 最终微调台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">J280</span><span class="brand-title">旋转倒立摆 · 最终微调台</span></div>
+  <div class="top-status">
+    <span id="serialDot" class="dot offline"></span>
+    <span id="serialText">未连接串口</span>
+    <span class="sep">|</span>
+    <span id="rateText">0.0 帧/s</span>
+    <span class="sep">|</span>
+    <span id="bitstreamText">impl 位流：未知</span>
+    <span class="sep">|</span>
+    <span id="clockText">--:--:--</span>
+  </div>
+  <div class="top-actions">
+    <button id="connectBtn" class="primary">连接串口</button>
+    <button id="disconnectBtn" disabled>断开</button>
+    <button id="pauseBtn">暂停绘图</button>
+    <button id="exportCsvBtn">导出 CSV</button>
+    <button id="saveRunBtn" class="accent">保存本次</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ================= 左栏 ================= -->
+  <aside class="col left">
+    <section class="card">
+      <div class="card-head"><h2>板载按键</h2><span class="hint">BANK_3 = 1.5V，按下为低</span></div>
+      <div class="key-list">
+        <div class="key-row"><kbd>SW1</kbd><div><b>零位标定</b><small>把摆杆扶到你想要的竖直零位，按住 ≥20 ms 后松开。锁存当前 ADC 为绝对零位；复位/重新烧录后失效。</small></div></div>
+        <div class="key-row"><kbd>SW2</kbd><div><b>短按：轨迹模式（6 档）</b><small>0° → +45° → −45° → +90° → −90° → 0.1 Hz 正弦，循环。</small><b>长按 ≥0.7 s：只清 PID 慢积分</b><small>不动编码器、不动基准线。（换零/锚定请用 SW4 长按）</small></div></div>
+        <div class="key-row"><kbd>SW3</kbd><div><b>电机使能翻转</b><small>上电默认关闭（安全）。按一次开，再按一次关；起摆/平衡都需要它为开。</small></div></div>
+        <div class="key-row"><kbd>SW4</kbd><div><b>短按：停机刹车 / 自由滑行切换</b><small>0 = 自由滑行，1 = 动态能耗制动。只在电机使能关闭后有意义。</small><b>长按 &gt;0.7 s：转臂基准清零</b><small>把当前转臂位置锚成 α=0，同时触发 pos_traj_gen.rezero。换零、A/B 实验用这个。</small></div></div>
+        <div class="key-row"><kbd>SW5</kbd><div><b>异步复位</b><small>清状态机、清标定、电机回到关闭、轨迹模式回 0。相当于重新上电。</small></div></div>
+      </div>
+      <div class="note warn">上电 SOP：扶正摆杆 → 短按 SW1 标定 → 短按 SW3 使能电机 → 自动起摆。烧录前务必扶稳摆杆并确认 SW3 为关。</div>
+    </section>
+
+    <section class="card param-card">
+      <div class="card-head">
+        <h2>参数</h2>
+        <span id="bridgeBadge" class="badge offline">桥接未连接</span>
+      </div>
+      <div id="paramStatus" class="note">正在读取参数表…</div>
+      <div class="note warn tiny">参数读的是 <code>02_FPGA_Source_0xD0FA/src/</code>（交接包内 0xD0FA 源码），不是板上正在跑的位流。仅“构建”不会动板子；第一次“构建并烧录”会把 src 当前状态写进 SRAM。</div>
+      <div class="param-tabs" id="paramTabs"></div>
+      <div class="param-list" id="paramList"></div>
+    </section>
+
+    <section class="card build-card">
+      <div class="card-head"><h2>参数进板</h2><span class="hint">改源码 → 构建 → 烧录</span></div>
+      <div class="note">
+        当前位流没有 UART 接收通路，参数不能在线写。这里的“进板”是：把参数写回 RTL 常量 →
+        <code>gw_sh</code> 构建 → <code>programmer_cli</code> SRAM 烧录。每次约 1–3 分钟。
+      </div>
+      <div class="build-actions">
+        <button id="resetDraftBtn" title="把草稿恢复成 src/ 当前常量（不是构建前备份）">载入当前源码值</button>
+        <button id="saveDraftBtn">保存草稿</button>
+        <button id="loadDraftBtn">载入草稿</button>
+        <button id="restoreBackupBtn" class="ghost" title="用 tune_backups/ 中最近一次构建前备份覆盖 src/">恢复上次备份</button>
+        <button id="buildBtn" class="primary">仅构建</button>
+        <button id="flashBtn" class="danger">构建并烧录</button>
+      </div>
+      <label class="checkline"><input id="safeCheck" type="checkbox"> 摆杆已扶稳，SW3 电机使能为关</label>
+      <label class="checkline">烧录确认词 <input id="burnConfirm" placeholder="输入英文 BURN" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+      <div id="buildState" class="build-state">空闲</div>
+      <pre id="buildLog" class="log">等待构建…</pre>
+      <div class="note tiny">构建硬门：时序报告必须齐全且本次新生成，DSP 必须 20/20，Setup/Hold slack ≥ 0，Fmax ≥ 50 MHz；任一不满足即判构建失败。烧录还要求页面勾选、<code>BURN</code> 确认词和桥接端的 <code>safe_ack</code>。</div>
+    </section>
+  </aside>
+
+  <!-- ================= 中栏 ================= -->
+  <section class="col center">
+    <section class="card viz-card">
+      <div class="card-head">
+        <h2>三维姿态</h2>
+        <div class="viz-readouts">
+          <span>θ <b id="rdTheta">--</b>°</span>
+          <span>θ̇ <b id="rdDtheta">--</b></span>
+          <span>α <b id="rdAlpha">--</b>°</span>
+          <span>α̇ <b id="rdDalpha">--</b></span>
+          <span>duty <b id="rdDuty">--</b></span>
+          <span id="rdState" class="state-pill">--</span>
+        </div>
+      </div>
+      <div class="viz-wrap">
+        <canvas id="viz3d"></canvas>
+        <div class="viz-overlay">
+          <div id="tipPos">摆杆末端 x/y/z：--</div>
+          <div class="legend-inline"><i class="sw arm"></i>摆臂 <i class="sw rod"></i>摆杆 <i class="sw trail"></i>末端轨迹</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>时域</h2>
+        <div class="toolbar">
+          <label>窗口
+            <select id="windowSelect">
+              <option value="5">5 s</option>
+              <option value="10">10 s</option>
+              <option value="30" selected>30 s</option>
+              <option value="60">60 s</option>
+              <option value="0">全部</option>
+            </select>
+          </label>
+          <label class="checkline inline"><input id="showTheta" type="checkbox" checked>θ</label>
+          <label class="checkline inline"><input id="showAlpha" type="checkbox" checked>α</label>
+          <label class="checkline inline"><input id="showDuty" type="checkbox" checked>duty</label>
+          <button id="markBtn">打标记</button>
+          <button id="clearBtn" class="ghost">清空</button>
+        </div>
+      </div>
+      <div class="chart-stack">
+        <canvas id="chartTheta" class="time-chart"></canvas>
+        <canvas id="chartAlpha" class="time-chart"></canvas>
+        <canvas id="chartDuty" class="time-chart"></canvas>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>频域</h2>
+        <div class="toolbar">
+          <label>FFT 窗
+            <select id="fftSelect">
+              <option value="512">5.12 s</option>
+              <option value="1024" selected>10.24 s</option>
+              <option value="2048">20.48 s</option>
+            </select>
+          </label>
+          <span class="hint">100 Hz 采样 · Hann · 0–25 Hz · N 随可用数据自适应</span>
+        </div>
+      </div>
+      <div class="chart-stack">
+        <canvas id="chartSpectrum" class="time-chart spectrum"></canvas>
+        <canvas id="chartSpectrogram" class="time-chart spectrogram"></canvas>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 右栏 ================= -->
+  <aside class="col right">
+    <section class="card">
+      <div class="card-head"><h2>稳定度与噪音</h2><span id="metricsScope" class="hint">--</span></div>
+      <div id="metricsGrid" class="metric-grid">
+        <div class="metric"><span>θ σ</span><b id="mThetaRms">--</b><small>°</small></div>
+        <div class="metric"><span>α σ</span><b id="mAlphaRms">--</b><small>°</small></div>
+        <div class="metric"><span>duty σ</span><b id="mDutyStd">--</b><small>count</small></div>
+        <div class="metric"><span>duty 音调幅</span><b id="mTone">--</b><small>count</small></div>
+        <div class="metric"><span>主频</span><b id="mFreq">--</b><small>Hz</small></div>
+        <div class="metric"><span>饱和 |d|≥1000</span><b id="mSat">--</b><small>%</small></div>
+        <div class="metric"><span>首捕保持</span><b id="mFirstHold">--</b><small>s</small></div>
+        <div class="metric"><span>起摆→首捕</span><b id="mCapture">--</b><small>s</small></div>
+        <div class="metric"><span>最长平衡</span><b id="mBestHold">--</b><small>s</small></div>
+        <div class="metric"><span>θ 高频噪声</span><b id="mHfNoise">--</b><small>°</small></div>
+        <div class="metric"><span>帧/坏帧</span><b id="mFrames">--</b><small></small></div>
+      </div>
+      <div class="note tiny">θ/α 都用<b>去均值标准差 σ</b>；窗口是“最长一段 BALANCE，跳过前 2 s”，与文档里固定 30–80 s 的数值不可直接比。FFT 为 2 的幂，<b>不足 256 点（2.56 s）不报主频/音调幅</b>；没有 BALANCE 段时统计退回全段并标注，频域留空；稳定段少于 32 点只报时长，σ/噪音/饱和留空。音调幅用锁相估计，饱和按 |duty| ≥ 1000。“起摆→首捕”= 首个 SWINGUP 起点到首个 BALANCE 入点。</div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>历史对比</h2><span class="hint">同窗口、同估计器</span></div>
+      <div class="field-row">
+        <select id="historySelect"><option value="">选择 data/ 里的历史 CSV…</option></select>
+        <button id="loadHistoryBtn">载入对比</button>
+      </div>
+      <div class="button-row">
+        <button id="clearCompareBtn" class="ghost">清空对比</button>
+        <button id="exportCompareBtn">导出对比 CSV</button>
+      </div>
+      <canvas id="chartCompare" class="time-chart small"></canvas>
+      <div class="table-wrap"><table id="compareTable"><thead><tr><th>运行</th><th>θσ°</th><th>dutyσ</th><th>主频</th><th>饱和</th><th>平衡s</th></tr></thead><tbody></tbody></table></div>
+      <div id="compareEmpty" class="note tiny">还没有对比项。可载入历史 CSV，或点顶栏“保存本次”。</div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>工具</h2><span id="healthBadge" class="badge offline">8788 未连</span></div>
+      <div class="button-row">
+        <button id="healthBtn">检查桥接</button>
+        <button id="diagBtn">复制诊断</button>
+        <button id="rawToggleBtn">原始字节</button>
+      </div>
+      <div class="field-row">
+        <label class="checkline inline"><input id="smooth3d" type="checkbox" checked>3D 平滑</label>
+      </div>
+      <div class="marker-list" id="markerList">暂无标记</div>
+      <pre id="rawBytes" class="log tiny hidden">AA 55 …</pre>
+      <div class="note tiny" id="warnBox">看门狗：正常。</div>
+      <div class="note tiny">快捷键：<kbd>C</kbd> 连接 / <kbd>D</kbd> 断开 / <kbd>Space</kbd> 暂停 / <kbd>M</kbd> 打标记。</div>
+    </section>
+  </aside>
+</main>
+
+<footer class="footer">
+  <span>J280 · 22 B 0xAA55 · 115200-8-N-1 · 100 Hz · Q12.16 小端</span>
+  <span id="bridgeText">桥接：http://127.0.0.1:8788</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

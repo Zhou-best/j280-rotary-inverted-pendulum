@@ -1,0 +1,131 @@
+// =============================================================================
+// J280 姿态控制系统开发套件 - 物理约束文件 (Physical Constraints File)
+// 目标器件: 高云半导体 GW2A-LV55PG484C8/I7 (GW2A-55C, PBGA484)
+// 顶层模块: j280_hw_top
+//
+// ★ 引脚来源: J280 姿态控制系统开发套件用户手册 3.2/3.3 节
+//            + coreboard_20230817 / Balance_Ctrl_20260618 原理图
+//
+// ★ Bank 电压 (核心板 VCCO 实测, 数据手册 3.2.3 节 + 原理图):
+//     BANK_2 = 3.3V   BANK_3 = 1.5V(注意!)   BANK_4 = 3.3V   BANK_5 = 3.3V
+//   BANK_3 上的按键与 LED 必须用 LVCMOS15 + BANK_VCCIO=1.5, 否则 PnR 报错。
+//
+// ★ 引脚合规性: 已用云源 V1.9.12.03 实际跑通 综合+PnR+时序 验证 (见构建日志)。
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. 系统时钟与硬件复位 (核心板)
+// -----------------------------------------------------------------------------
+IO_LOC  "clk_50m" M19;                          // 50MHz 有源晶振 (BANK_2)
+IO_PORT "clk_50m" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "rst_n" AB3;                            // SW5 按键兼复位 (BANK_5, 低有效)
+IO_PORT "rst_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// -----------------------------------------------------------------------------
+// 2. 用户交互按键 SW1~SW4 (核心板轻触按键, 按下为低, BANK_3 = 1.5V)
+// -----------------------------------------------------------------------------
+IO_LOC  "key_zero_calib" T18;                   // SW1: 摆杆垂直零点标定
+IO_PORT "key_zero_calib" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
+
+IO_LOC  "key_pos_clear" R18;                    // SW2: 短按切模式 / 长按转臂位置清零
+IO_PORT "key_pos_clear" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
+
+IO_LOC  "key_motor_en" U20;                     // SW3: 电机使能切换 (按下沿翻转锁存)
+IO_PORT "key_motor_en" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
+
+IO_LOC  "key_brake_mode" T20;                   // SW4: 停机刹车/滑行切换
+IO_PORT "key_brake_mode" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
+
+// -----------------------------------------------------------------------------
+// 3. 核心板状态指示 LED (FPGA_LED1~4, 经 NPN 三极管驱动, 高电平点亮)
+//    原理图: +3.3V -> 10K -> LED -> MM3904 集电极, 基极 <- FPGA 引脚
+// -----------------------------------------------------------------------------
+IO_LOC  "led_balance" U18;                      // FPGA_LED1: 自平衡区指示
+IO_PORT "led_balance" IO_TYPE=LVCMOS15 PULL_MODE=NONE DRIVE=4 BANK_VCCIO=1.5;
+
+IO_LOC  "led_calib_ok" U19;                     // FPGA_LED2: 零位已标定指示
+IO_PORT "led_calib_ok" IO_TYPE=LVCMOS15 PULL_MODE=NONE DRIVE=4 BANK_VCCIO=1.5;
+
+IO_LOC  "led_motor_run" U17;                    // FPGA_LED3: 电机输出/保护警报
+IO_PORT "led_motor_run" IO_TYPE=LVCMOS15 PULL_MODE=NONE DRIVE=4 BANK_VCCIO=1.5;
+
+IO_LOC  "led_enable" T17;                       // FPGA_LED4: 电机使能已打开
+IO_PORT "led_enable" IO_TYPE=LVCMOS15 PULL_MODE=NONE DRIVE=4 BANK_VCCIO=1.5;
+
+// -----------------------------------------------------------------------------
+// 4. 直流电机驱动接口 - TB6612FNG 双通道并联 (BANK_4 = 3.3V)
+//    接线依据 (Balance_Ctrl_20260618 原理图, 与手册 3.3.3/3.3.4 的通道标注不一致):
+//      A 通道输出 AO1/AO2 -> O3/O4 -> XH2 接口
+//      B 通道输出 BO1/BO2 -> O1/O2 -> XH1 接口 (★实际接电机的通道)
+//    故两个通道并联输出同一路信号 (与官方 Interface_test 例程做法一致)。
+//    注意: 底板 TB6612 的 STBY 已硬件上拉至 3.3V 常使能, 无 FPGA 控制引脚;
+//          转向由 IN1/IN2 决定, 无独立 DIR 引脚。
+// -----------------------------------------------------------------------------
+IO_LOC  "motor_pwm" Y18;                        // PWMA: 20kHz PWM (通道A → O3/O4/XH2)
+IO_PORT "motor_pwm" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "motor_in1" Y17;                        // AIN1 (通道A 方向1)
+IO_PORT "motor_in1" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "motor_in2" Y19;                        // AIN2 (通道A 方向2)
+IO_PORT "motor_in2" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "motor_pwm_b" V14;                      // PWMB (通道B → O1/O2/XH1 ★电机所在)
+IO_PORT "motor_pwm_b" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "motor_in1_b" V15;                      // 通道B 方向1 (=手册BIN2, 官方例程"正转"时置高)
+IO_PORT "motor_in1_b" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "motor_in2_b" AA17;                     // 通道B 方向2 (=手册BIN1)
+IO_PORT "motor_in2_b" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+// -----------------------------------------------------------------------------
+// 5. 电机正交编码器接口 (XH1 的 1A/1B, BANK_4 = 3.3V, 板上无外部上拉依赖)
+//    MG531 电机: 13线霍尔编码器 x 减速比 1:20 -> 每圈 260 脉冲/相, 4倍频 = 1040 CPR
+//    若排线插在 XH2: enc_a=W18, enc_b=W17
+// -----------------------------------------------------------------------------
+IO_LOC  "enc_a" Y20;                            // 编码器 1A 相
+IO_PORT "enc_a" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "enc_b" AA20;                           // 编码器 1B 相
+IO_PORT "enc_b" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// -----------------------------------------------------------------------------
+// 6. 摆杆角位移传感器接口 - 3PA1030 并行 ADC (BANK_2 = 3.3V)
+//    WDD35D4 电位器 0~3.3V -> 底板分压 0~2.0V -> AD1_IN -> D9~D0 并行数据
+//    AD1_OTR (F18, 量程超限指示) 本设计未使用
+// -----------------------------------------------------------------------------
+IO_LOC  "adc_oe_n" H20;                         // AD1_OE: 0=正常工作, 1=高阻
+IO_PORT "adc_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "adc_clk" G18;                          // AD1_CLK: ADC 采样时钟 (12.5MHz)
+IO_PORT "adc_clk" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "adc_data_in[0]" L21;                   // AD1_D0
+IO_PORT "adc_data_in[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[1]" M21;                   // AD1_D1
+IO_PORT "adc_data_in[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[2]" J20;                   // AD1_D2
+IO_PORT "adc_data_in[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[3]" J19;                   // AD1_D3
+IO_PORT "adc_data_in[3]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[4]" D19;                   // AD1_D4
+IO_PORT "adc_data_in[4]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[5]" H18;                   // AD1_D5
+IO_PORT "adc_data_in[5]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[6]" H19;                   // AD1_D6
+IO_PORT "adc_data_in[6]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[7]" G19;                   // AD1_D7
+IO_PORT "adc_data_in[7]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[8]" G17;                   // AD1_D8
+IO_PORT "adc_data_in[8]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+IO_LOC  "adc_data_in[9]" E19;                   // AD1_D9
+IO_PORT "adc_data_in[9]" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// -----------------------------------------------------------------------------
+// 7. 调试遥测串口 - 核心板 CH340 → PC 端 COM13 (与厂商工程一致, 已实测可用)
+//    115200-8-N-1 只发不收; 帧格式见 uart_telemetry.v 头注释
+// -----------------------------------------------------------------------------
+IO_LOC  "uart_tx" K20;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
